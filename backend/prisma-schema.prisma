@@ -1,0 +1,525 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url  	= env("DATABASE_URL")
+}
+
+// ========================================
+// USUARIOS Y ROLES
+// ========================================
+
+model User {
+  id    	String   @id @default(cuid())
+  email 	String   @unique
+  password  String
+  firstName String
+  lastName  String
+  phone 	String?
+  avatar	String?
+  isActive  Boolean  @default(true)
+  role  	UserRole @default(SECRETARIA)
+ 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+ 
+  // Relaciones
+  createdPatients  Patient[] @relation("CreatedByUser")
+  assignedPatients Patient[] @relation("AssignedToUser")
+  appointments 	Appointment[]
+  invoices    	Invoice[]
+  movements   	StockMovement[]
+ 
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  MEDICO
+  SECRETARIA
+  VIEWER
+}
+
+// ========================================
+// PACIENTES Y HISTORIALES
+// ========================================
+
+model Patient {
+  id       	String	@id @default(cuid())
+  firstName	String
+  lastName 	String
+  email    	String?   @unique
+  phone    	String
+  dni      	String	@unique
+  birthDate	DateTime
+  gender   	Gender
+  address  	String?
+  city     	String?   @default("Córdoba")
+  province 	String?   @default("Córdoba")
+  country  	String	@default("Argentina")
+ 
+  // Datos médicos
+  bloodType	String?
+  allergies	String?
+  medications  String?
+  medicalNotes String?
+ 
+  isActive 	Boolean   @default(true)
+ 
+  createdAt	DateTime  @default(now())
+  updatedAt	DateTime  @updatedAt
+ 
+  // Relaciones
+  createdBy	User  	@relation("CreatedByUser", fields: [createdById], references: [id])
+  createdById  String
+  assignedTo   User? 	@relation("AssignedToUser", fields: [assignedToId], references: [id])
+  assignedToId String?
+ 
+  medicalRecords MedicalRecord[]
+  appointments   Appointment[]
+  invoices  	Invoice[]
+  treatments	PatientTreatment[]
+ 
+  @@map("patients")
+}
+
+enum Gender {
+  MASCULINO
+  FEMENINO
+  OTRO
+}
+
+model MedicalRecord {
+  id      	String   @id @default(cuid())
+  patientId   String
+  title   	String
+  description String
+  attachments String[] // URLs a archivos
+  recordDate  DateTime @default(now())
+ 
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+ 
+  // Relaciones
+  patient 	Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+ 
+  @@map("medical_records")
+}
+
+// ========================================
+// TRATAMIENTOS Y SERVICIOS
+// ========================================
+
+model Treatment {
+  id      	String  @id @default(cuid())
+  name    	String
+  description String?
+  duration	Int 	// minutos
+  price   	Decimal @db.Decimal(10,2)
+  category	String
+  isActive	Boolean @default(true)
+ 
+  // Productos necesarios
+  requiredProducts TreatmentProduct[]
+ 
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+ 
+  // Relaciones
+  appointments 	Appointment[]
+  patientTreatments PatientTreatment[]
+  invoiceItems 	InvoiceItem[]
+ 
+  @@map("treatments")
+}
+
+model PatientTreatment {
+  id          	String   @id @default(cuid())
+  patientId   	String
+  treatmentId 	String
+  startDate   	DateTime
+  endDate     	DateTime?
+  status      	TreatmentStatus @default(ACTIVO)
+  sessions    	Int  	@default(1)
+  completedSessions Int   @default(0)
+  notes       	String?
+ 
+  createdAt   	DateTime @default(now())
+  updatedAt   	DateTime @updatedAt
+ 
+  // Relaciones
+  patient     	Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  treatment   	Treatment @relation(fields: [treatmentId], references: [id])
+ 
+  @@unique([patientId, treatmentId, startDate])
+  @@map("patient_treatments")
+}
+
+enum TreatmentStatus {
+  ACTIVO
+  COMPLETADO
+  SUSPENDIDO
+  CANCELADO
+}
+
+// ========================================
+// AGENDA Y CITAS
+// ========================================
+
+model Appointment {
+  id      	String        	@id @default(cuid())
+  patientId   String
+  treatmentId String
+  userId  	String        	// Usuario que atiende
+ 
+  startTime   DateTime
+  endTime 	DateTime
+  status  	AppointmentStatus @default(PROGRAMADA)
+  notes   	String?
+ 
+  // Integración Google Calendar
+  googleEventId String?
+ 
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+ 
+  // Relaciones
+  patient 	Patient   @relation(fields: [patientId], references: [id])
+  treatment   Treatment @relation(fields: [treatmentId], references: [id])
+  user    	User  	@relation(fields: [userId], references: [id])
+ 
+  @@map("appointments")
+}
+
+enum AppointmentStatus {
+  PROGRAMADA
+  CONFIRMADA
+  EN_CURSO
+  COMPLETADA
+  CANCELADA
+  NO_ASISTIO
+}
+
+// ========================================
+// PRODUCTOS E INVENTARIO
+// ========================================
+
+model Product {
+  id      	String   @id @default(cuid())
+  name    	String
+  description String?
+  sku     	String   @unique
+  barcode 	String?
+  category	String
+  brand   	String?
+ 
+  // Precios
+  costPrice   Decimal  @db.Decimal(10,2)
+  salePrice   Decimal  @db.Decimal(10,2)
+ 
+  // Stock
+  currentStock Int 	@default(0)
+  minStock 	Int 	@default(5)
+  unit     	String  // "ml", "gr", "unidad", etc.
+ 
+  // Vencimiento
+  hasExpiration Boolean @default(false)
+ 
+  isActive	Boolean  @default(true)
+ 
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+ 
+  // Relaciones
+  suppliers   	ProductSupplier[]
+  stockMovements  StockMovement[]
+  treatmentProducts TreatmentProduct[]
+  invoiceItems	InvoiceItem[]
+ 
+  @@map("products")
+}
+
+model TreatmentProduct {
+  id      	String @id @default(cuid())
+  treatmentId String
+  productId   String
+  quantity	Int	// Cantidad necesaria por sesión
+ 
+  // Relaciones
+  treatment   Treatment @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+  product 	Product   @relation(fields: [productId], references: [id])
+ 
+  @@unique([treatmentId, productId])
+  @@map("treatment_products")
+}
+
+// ========================================
+// PROVEEDORES
+// ========================================
+
+model Supplier {
+  id      	String  @id @default(cuid())
+  name    	String
+  cuit    	String  @unique
+  email   	String?
+  phone   	String?
+  address 	String?
+  city    	String?
+  province	String?
+  country 	String  @default("Argentina")
+ 
+  // Condiciones comerciales
+  paymentTerms String? // "30 días", "contado", etc.
+ 
+  isActive	Boolean @default(true)
+ 
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+ 
+  // Relaciones
+  products	ProductSupplier[]
+  purchases   Purchase[]
+ 
+  @@map("suppliers")
+}
+
+model ProductSupplier {
+  id        	String  @id @default(cuid())
+  productId 	String
+  supplierId	String
+  supplierPrice Decimal @db.Decimal(10,2)
+  isPreferred   Boolean @default(false)
+ 
+  createdAt 	DateTime @default(now())
+  updatedAt 	DateTime @updatedAt
+ 
+  // Relaciones
+  product   	Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplier  	Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+ 
+  @@unique([productId, supplierId])
+  @@map("product_suppliers")
+}
+
+// ========================================
+// COMPRAS Y STOCK
+// ========================================
+
+model Purchase {
+  id      	String    	@id @default(cuid())
+  supplierId  String
+ 
+  purchaseNumber String 	@unique
+  purchaseDate   DateTime   @default(now())
+  dueDate    	DateTime?
+ 
+  subtotal	Decimal   	@db.Decimal(10,2)
+  tax     	Decimal   	@db.Decimal(10,2) @default(0)
+  total   	Decimal   	@db.Decimal(10,2)
+ 
+  status  	PurchaseStatus @default(PENDIENTE)
+ 
+  createdAt   DateTime  	@default(now())
+  updatedAt   DateTime  	@updatedAt
+ 
+  // Relaciones
+  supplier	Supplier  	@relation(fields: [supplierId], references: [id])
+  items   	PurchaseItem[]
+ 
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id      	String   @id @default(cuid())
+  purchaseId  String
+  productId   String
+ 
+  quantity	Int
+  unitPrice   Decimal  @db.Decimal(10,2)
+  total   	Decimal  @db.Decimal(10,2)
+ 
+  expiryDate  DateTime?
+ 
+  // Relaciones
+  purchase	Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product 	Product  @relation(fields: [productId], references: [id])
+ 
+  @@map("purchase_items")
+}
+
+enum PurchaseStatus {
+  PENDIENTE
+  RECIBIDA
+  FACTURADA
+  PAGADA
+  CANCELADA
+}
+
+model StockMovement {
+  id      	String        	@id @default(cuid())
+  productId   String
+  userId  	String
+ 
+  type    	StockMovementType
+  quantity	Int           	// Positivo para entradas, negativo para salidas
+  reason  	String?
+  reference   String?       	// ID de factura, cita, etc.
+ 
+  expiryDate  DateTime?
+ 
+  createdAt   DateTime      	@default(now())
+ 
+  // Relaciones
+  product 	Product       	@relation(fields: [productId], references: [id])
+  user    	User          	@relation(fields: [userId], references: [id])
+ 
+  @@map("stock_movements")
+}
+
+enum StockMovementType {
+  COMPRA
+  VENTA
+  USO_TRATAMIENTO
+  AJUSTE
+  VENCIMIENTO
+  DEVOLUCION
+}
+
+// ========================================
+// FACTURACIÓN
+// ========================================
+
+model Invoice {
+  id          	String    	@id @default(cuid())
+  patientId   	String
+  userId      	String
+ 
+  invoiceNumber   String    	@unique
+  invoiceDate 	DateTime  	@default(now())
+  dueDate     	DateTime?
+ 
+  subtotal    	Decimal   	@db.Decimal(10,2)
+  tax         	Decimal   	@db.Decimal(10,2) @default(0)
+  discount    	Decimal   	@db.Decimal(10,2) @default(0)
+  total       	Decimal   	@db.Decimal(10,2)
+ 
+  status      	InvoiceStatus @default(PENDIENTE)
+ 
+  // AFIP
+  afipStatus  	String?
+  afipCAE     	String?
+  afipCAEDueDate  DateTime?
+ 
+  createdAt   	DateTime  	@default(now())
+  updatedAt   	DateTime  	@updatedAt
+ 
+  // Relaciones
+  patient     	Patient   	@relation(fields: [patientId], references: [id])
+  user        	User      	@relation(fields: [userId], references: [id])
+  items       	InvoiceItem[]
+  payments    	Payment[]
+ 
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id      	String  @id @default(cuid())
+  invoiceId   String
+ 
+  // Puede ser producto o tratamiento
+  productId   String?
+  treatmentId String?
+ 
+  description String
+  quantity	Int
+  unitPrice   Decimal @db.Decimal(10,2)
+  total   	Decimal @db.Decimal(10,2)
+ 
+  // Relaciones
+  invoice 	Invoice	@relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product 	Product?   @relation(fields: [productId], references: [id])
+  treatment   Treatment? @relation(fields: [treatmentId], references: [id])
+ 
+  @@map("invoice_items")
+}
+
+enum InvoiceStatus {
+  PENDIENTE
+  PAGADA
+  PARCIALMENTE_PAGADA
+  VENCIDA
+  CANCELADA
+}
+
+// ========================================
+// MEDIOS DE PAGO
+// ========================================
+
+model Payment {
+  id          	String    	@id @default(cuid())
+  invoiceId   	String
+ 
+  amount      	Decimal   	@db.Decimal(10,2)
+  paymentMethod   PaymentMethod
+  paymentDate 	DateTime  	@default(now())
+ 
+  // Detalles específicos por método
+  cardDetails 	String?   	// JSON con datos de tarjeta
+  transferDetails String?   	// JSON con datos de transferencia
+  mpDetails   	String?   	// JSON con datos de MercadoPago
+ 
+  reference   	String?   	// Número de referencia/autorización
+  status      	PaymentStatus @default(COMPLETADO)
+ 
+  createdAt   	DateTime  	@default(now())
+  updatedAt   	DateTime  	@updatedAt
+ 
+  // Relaciones
+  invoice     	Invoice   	@relation(fields: [invoiceId], references: [id])
+ 
+  @@map("payments")
+}
+
+enum PaymentMethod {
+  EFECTIVO
+  TARJETA_DEBITO
+  TARJETA_CREDITO
+  TRANSFERENCIA
+  MERCADO_PAGO
+  CHEQUE
+}
+
+enum PaymentStatus {
+  PENDIENTE
+  COMPLETADO
+  RECHAZADO
+  CANCELADO
+}
+
+// ========================================
+// CONFIGURACIONES DEL SISTEMA
+// ========================================
+
+model SystemConfig {
+  id      	String   @id @default(cuid())
+  key     	String   @unique
+  value   	String
+  description String?
+ 
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+ 
+  @@map("system_config")
+}
+
+// Datos iniciales recomendados para system_config:
+// - "clinic_name": "Centro de Medicina Estética"
+// - "clinic_address": "Dirección en Córdoba"
+// - "clinic_phone": "Teléfono"
+// - "clinic_email": "Email"
+// - "afip_cuit": "CUIT para facturación"
+// - "iibb_number": "Número de Ingresos Brutos Córdoba"
+// - "google_calendar_enabled": "true/false"
+// - "mercadopago_enabled": "true/false"
