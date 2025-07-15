@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  postgres:
+	image: postgres:15-alpine
+	container_name: estetica_postgres
+	restart: unless-stopped
+	environment:
+  	POSTGRES_DB: estetica_db
+  	POSTGRES_USER: estetica_user
+  	POSTGRES_PASSWORD: estetica_pass_2025
+  	POSTGRES_HOST_AUTH_METHOD: trust
+	volumes:
+  	- postgres_data:/var/lib/postgresql/data
+  	- ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+	ports:
+  	- "5432:5432"
+	networks:
+  	- estetica_network
+	healthcheck:
+  	test: ["CMD-SHELL", "pg_isready -U estetica_user -d estetica_db"]
+  	interval: 30s
+  	timeout: 10s
+  	retries: 3
+
+  # Adminer para gestión de BD
+  adminer:
+	image: adminer:latest
+	container_name: estetica_adminer
+	restart: unless-stopped
+	ports:
+  	- "8080:8080"
+	networks:
+  	- estetica_network
+	depends_on:
+  	- postgres
+
+  # Backend API
+  backend:
+	build:
+  	context: ./backend
+  	dockerfile: Dockerfile
+	container_name: estetica_backend
+	restart: unless-stopped
+	environment:
+  	NODE_ENV: development
+  	PORT: 3000
+  	DATABASE_URL: postgresql://estetica_user:estetica_pass_2025@postgres:5432/estetica_db
+  	JWT_SECRET: estetica_jwt_secret_key_2025_cordoba
+  	AFIP_CERT_PATH: /app/certs/
+  	GOOGLE_CALENDAR_CREDENTIALS: /app/credentials/google-calendar.json
+	volumes:
+  	- ./backend:/app
+  	- ./shared:/app/shared
+  	- ./certs:/app/certs
+  	- ./credentials:/app/credentials
+  	- /app/node_modules
+	ports:
+  	- "3000:3000"
+	networks:
+  	- estetica_network
+	depends_on:
+  	postgres:
+    	condition: service_healthy
+	command: npm run dev
+
+  # Frontend React Native (Expo)
+  frontend:
+	build:
+  	context: ./frontend
+  	dockerfile: Dockerfile
+	container_name: estetica_frontend
+	restart: unless-stopped
+	environment:
+  	EXPO_DEVTOOLS_LISTEN_ADDRESS: 0.0.0.0
+  	API_BASE_URL: http://backend:3000/api
+	volumes:
+  	- ./frontend:/app
+  	- ./shared:/app/shared
+  	- /app/node_modules
+	ports:
+  	- "19000:19000"  # Expo DevTools
+  	- "19001:19001"  # Expo DevTools (internal)
+  	- "19002:19002"  # Expo Metro bundler
+  	- "19006:19006"  # Web version
+	networks:
+  	- estetica_network
+	depends_on:
+  	- backend
+	command: npx expo start --web --tunnel
+
+volumes:
+  postgres_data:
+	driver: local
+
+networks:
+  estetica_network:
+	driver: bridge
